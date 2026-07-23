@@ -51,6 +51,7 @@ class FiscoCaptureApp(tk.Tk):
         self._caminho_pdf = tk.StringVar(value="Nenhum arquivo selecionado")
         self._processando  = False
         self._registros:   list[dict] = []
+        self._filtrando_duplicados = False
 
         # Tratamento de saída limpa
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
@@ -127,6 +128,28 @@ class FiscoCaptureApp(tk.Tk):
         btn_limpar.grid(row=0, column=4)
 
         sel.columnconfigure(1, weight=1)
+
+        # --- Ações Secundárias (Copiar / Filtrar) ---
+        act = tk.Frame(self, bg=COR_FUNDO, padx=20)
+        act.pack(fill="x", pady=(0, 10))
+
+        self._btn_copiar_tudo = tk.Button(
+            act, text="📋  Copiar Todos os Resultados", command=self._copiar_tudo,
+            bg=COR_BORDA, fg=COR_TEXTO, font=FONTE_LABEL,
+            relief="flat", padx=14, pady=6, cursor="hand2",
+            activebackground=COR_DESTAQUE, activeforeground="white",
+            state="disabled"
+        )
+        self._btn_copiar_tudo.pack(side="left", padx=(0, 8))
+
+        self._btn_filtra_duplicados = tk.Button(
+            act, text="🔍  Remover Duplicados", command=self._toggle_duplicados,
+            bg=COR_BORDA, fg=COR_TEXTO, font=FONTE_LABEL,
+            relief="flat", padx=14, pady=6, cursor="hand2",
+            activebackground=COR_DESTAQUE, activeforeground="white",
+            state="disabled"
+        )
+        self._btn_filtra_duplicados.pack(side="left")
 
         # --- Barra de progresso ---
         self._progresso = ttk.Progressbar(
@@ -389,24 +412,16 @@ class FiscoCaptureApp(tk.Tk):
         self._btn_processar.config(state="normal", text="▶  Processar")
         self._registros = registros
 
-        paginas_vistas = set()
-        for idx, reg in enumerate(registros):
-            tag = "par" if idx % 2 == 0 else "impar"
-            paginas_vistas.add(reg["pagina"])
-            self._tree.insert("", "end", values=(
-                reg["pagina"],
-                reg["inscricao"],
-                reg["referencia"],
-                reg["cda"],
-                reg["situacao"],
-            ), tags=(tag,))
+        # Habilita botões de ações adicionais
+        self._btn_copiar_tudo.config(state="normal")
+        self._btn_filtra_duplicados.config(state="normal")
 
-        total     = len(registros)
-        n_paginas = len(paginas_vistas)
+        # Atualiza a tabela
+        self._atualizar_tabela()
+
+        total = len(registros)
+        n_paginas = len(set(r["pagina"] for r in registros))
         n_avisos  = len(avisos)
-
-        self._lbl_total.config(text=f"Registros: {total}")
-        self._lbl_paginas.config(text=f"Páginas com dados: {n_paginas}")
         
         # Garante a ordenação visual sequencial pelas páginas
         if total > 0:
@@ -458,6 +473,13 @@ class FiscoCaptureApp(tk.Tk):
     def _limpar(self):
         self._caminho_pdf.set("Nenhum arquivo selecionado")
         self._btn_processar.config(state="disabled")
+        self._btn_copiar_tudo.config(state="disabled")
+        self._btn_filtra_duplicados.config(state="disabled")
+        self._filtrando_duplicados = False
+        self._btn_filtra_duplicados.config(
+            bg=COR_BORDA, fg=COR_TEXTO, text="🔍  Remover Duplicados",
+            activebackground=COR_DESTAQUE, activeforeground="white"
+        )
         self._limpar_resultados()
         self._lbl_total.config(text="Registros: —")
         self._lbl_paginas.config(text="Páginas: —")
@@ -471,6 +493,100 @@ class FiscoCaptureApp(tk.Tk):
         self._txt_log.config(state="normal")
         self._txt_log.delete("1.0", "end")
         self._txt_log.config(state="disabled")
+
+    def _atualizar_tabela(self):
+        # 1. Limpa os itens visuais da treeview
+        for item in self._tree.get_children():
+            self._tree.delete(item)
+
+        registros_a_exibir = []
+        if self._filtrando_duplicados:
+            # Aumenta a largura da coluna Pág. para 260 para exibir a lista completa sem cortes
+            self._tree.column("pagina", width=260, minwidth=60, anchor="center")
+            agrupados = {}
+            for r in self._registros:
+                chave = r["inscricao"].strip()
+                if not chave:
+                    continue
+                if chave not in agrupados:
+                    agrupados[chave] = {
+                        "pagina": str(r["pagina"]),
+                        "inscricao": chave,
+                        "referencia": r["referencia"],
+                        "cda": r["cda"],
+                        "situacao": r["situacao"],
+                        "paginas_lista": [r["pagina"]]
+                    }
+                else:
+                    if r["pagina"] not in agrupados[chave]["paginas_lista"]:
+                        agrupados[chave]["paginas_lista"].append(r["pagina"])
+            
+            for chave, reg in agrupados.items():
+                reg["paginas_lista"].sort()
+                reg["pagina"] = ", ".join(map(str, reg["paginas_lista"]))
+                registros_a_exibir.append(reg)
+        else:
+            # Restaura a largura compacta original se não estiver filtrando
+            self._tree.column("pagina", width=60, minwidth=40, anchor="center")
+            registros_a_exibir = self._registros
+
+        paginas_vistas = set()
+        for idx, reg in enumerate(registros_a_exibir):
+            tag = "par" if idx % 2 == 0 else "impar"
+            if self._filtrando_duplicados:
+                for p in reg["paginas_lista"]:
+                    paginas_vistas.add(p)
+            else:
+                paginas_vistas.add(reg["pagina"])
+
+            self._tree.insert("", "end", values=(
+                reg["pagina"],
+                reg["inscricao"],
+                reg["referencia"],
+                reg["cda"],
+                reg["situacao"],
+            ), tags=(tag,))
+
+        total = len(registros_a_exibir)
+        n_paginas = len(paginas_vistas)
+        self._lbl_total.config(text=f"Registros: {total}")
+        self._lbl_paginas.config(text=f"Páginas com dados: {n_paginas}")
+
+        if total > 0:
+            self._ordenar("pagina", False)
+
+    def _toggle_duplicados(self):
+        self._filtrando_duplicados = not self._filtrando_duplicados
+        if self._filtrando_duplicados:
+            self._btn_filtra_duplicados.config(
+                bg=COR_SUCESSO, fg="#1e2130", text="✓  Sem Duplicados",
+                activebackground="#37b88f", activeforeground="#1e2130"
+            )
+            self._log_escrever("🔍 Filtro de duplicados ativado.\n")
+        else:
+            self._btn_filtra_duplicados.config(
+                bg=COR_BORDA, fg=COR_TEXTO, text="🔍  Remover Duplicados",
+                activebackground=COR_DESTAQUE, activeforeground="white"
+            )
+            self._log_escrever("🔍 Filtro de duplicados desativado.\n")
+        self._atualizar_tabela()
+
+    def _copiar_tudo(self):
+        linhas = []
+        # Adiciona cabeçalho amigável
+        linhas.append("Pág.\tInscrição\tReferência\tNº da C.D.A\tSituação")
+        for item in self._tree.get_children():
+            valores = self._tree.item(item, "values")
+            linhas.append("\t".join(str(v) for v in valores))
+        
+        if len(linhas) <= 1:
+            messagebox.showinfo("Aviso", "Não há registros na tabela para copiar.")
+            return
+
+        texto_copiar = "\n".join(linhas)
+        if self._tenta_copiar_para_clipboard(texto_copiar):
+            self._log_escrever(f"📋 Copiados {len(linhas)-1} registros para a área de transferência.\n")
+            messagebox.showinfo("Sucesso", f"{len(linhas)-1} registros copiados com sucesso!")
 
     def _log_escrever(self, texto: str):
         self._txt_log.config(state="normal")
