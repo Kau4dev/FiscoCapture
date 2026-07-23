@@ -3,7 +3,7 @@ name: Build and Release Windows EXE
 on:
   push:
     tags:
-      - 'v*' # Dispara quando você criar uma tag tipo v1.0.0
+      - "v*" # Dispara quando você criar uma tag tipo v1.0.0
   workflow_dispatch: # Permite disparar manualmente na aba Actions
 
 permissions:
@@ -39,11 +39,6 @@ jobs:
           name: Versão ${{ github.ref_name }}
           body: |
             Executável FiscoCapture compilado para Windows 64-bit.
-            
-            **Melhorias desta versão:**
-            * ⚡ **Velocidade ultra otimizada:** processamento em paralelo das páginas.
-            * 📋 **Facilidade de cópia:** Dê duplo clique em uma célula para copiá-la.
-            * 🔒 **Segurança:** os dados lidos continuam apenas em tela e memória.
           draft: false
           prerelease: false
         env:

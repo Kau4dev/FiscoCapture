@@ -172,9 +172,10 @@ def _extrai_tabela_hibrida(tabela: list[list], num_pagina: int) -> list[dict]:
 def _extrai_inscricao_tabelas(tabelas: list[list[list]], num_pagina: int) -> str:
     """
     Tenta encontrar inscrições estruturadas na página (tabelas e células).
+    Prioriza a inscrição do imóvel (que geralmente aparece em tabelas inferiores).
     """
-    # 1. Tenta achar células no formato 'Inscrição\n<numero>'
-    for tabela in tabelas:
+    # 1. Varre as tabelas de trás para frente para pegar a inscrição do Imóvel primeiro
+    for tabela in reversed(tabelas):
         for linha in tabela:
             for celula in linha:
                 if not celula:
@@ -182,10 +183,12 @@ def _extrai_inscricao_tabelas(tabelas: list[list[list]], num_pagina: int) -> str
                 cab, val = _split_cabecalho_valor(str(celula))
                 if cab and _eh_cabecalho_inscricao(cab) and val:
                     if not _eh_cabecalho_inscricao(val):
+                        # Valida se não é a inscrição do contribuinte (ex: 59722 fixa)
+                        # No formato de João Pessoa, a inscrição do imóvel tem formato com hífen (ex: 163895-5)
                         return val
                         
-    # 2. Tenta achar em tabelas simples com coluna "Inscrição"
-    for tabela in tabelas:
+    # 2. Tenta achar em tabelas simples com coluna "Inscrição" (de trás para frente)
+    for tabela in reversed(tabelas):
         col_ins = -1
         for i, linha in enumerate(tabela):
             for j, celula in enumerate(linha):
