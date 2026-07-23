@@ -1,6 +1,7 @@
 """
 interface.py — FiscoCapture
 Interface gráfica com tkinter. Todos os dados ficam apenas em memória/tela.
+Suporta cópia rápida de valores da tabela.
 """
 
 import tkinter as tk
@@ -51,8 +52,12 @@ class FiscoCaptureApp(tk.Tk):
         self._processando  = False
         self._registros:   list[dict] = []
 
+        # Tratamento de saída limpa
+        self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
+
         self._constroi_ui()
         self._centraliza()
+        self._cria_menu_contexto()
 
     # ------------------------------------------------------------------
     # Layout
@@ -76,7 +81,7 @@ class FiscoCaptureApp(tk.Tk):
         # Aviso de segurança
         tk.Label(
             hdr,
-            text="🔒  Dados exibidos em tela — nenhum arquivo é gerado",
+            text="🔒  Dados em tela — Dê duplo clique para copiar valores",
             font=("Segoe UI", 9), fg=COR_SUCESSO, bg=COR_PAINEL, padx=20
         ).pack(side="right", pady=15)
 
@@ -164,16 +169,17 @@ class FiscoCaptureApp(tk.Tk):
 
     def _constroi_tabela(self, parent):
         colunas = ("pagina", "inscricao", "referencia", "cda", "situacao")
+        self.colunas = colunas
         cabecalhos = {
             "pagina":    "Pág.",
-            "inscricao": "Inscrição",
+            "inscricao": "Inscrição (Duplo clique copia)",
             "referencia":"Referência",
-            "cda":       "Nº da C.D.A",
+            "cda":       "Nº da C.D.A (Duplo clique copia)",
             "situacao":  "Situação",
         }
         larguras = {
-            "pagina": 50, "inscricao": 130, "referencia": 260,
-            "cda": 160, "situacao": 120
+            "pagina": 50, "inscricao": 200, "referencia": 260,
+            "cda": 220, "situacao": 120
         }
 
         frame = tk.Frame(parent, bg=COR_FUNDO)
@@ -209,8 +215,10 @@ class FiscoCaptureApp(tk.Tk):
                                            foreground=COR_TEXTO)
         self._tree.tag_configure("impar", background=COR_LINHA_IMPAR,
                                            foreground=COR_TEXTO)
-        self._tree.tag_configure("inscricao", background="#2d2050",
-                                              foreground=COR_AVISO)
+        
+        # Interações de cópia
+        self._tree.bind("<Double-1>", self._on_double_click)
+        self._tree.bind("<Button-3>", self._on_right_click)
 
     def _constroi_log(self, parent):
         frame = tk.Frame(parent, bg=COR_FUNDO)
@@ -234,6 +242,7 @@ class FiscoCaptureApp(tk.Tk):
         estilo = ttk.Style(self)
         estilo.theme_use("clam")
 
+        # Configura as cores da treeview ativamente para o tema escuro
         estilo.configure(
             "Custom.Treeview",
             background=COR_LINHA_PAR, foreground=COR_TEXTO,
@@ -246,11 +255,14 @@ class FiscoCaptureApp(tk.Tk):
             background=COR_BORDA, foreground=COR_TEXTO,
             relief="flat", font=("Segoe UI", 9, "bold"),
         )
+        
+        # Corrige comportamento do Windows que sobrescreve cores das tags par/ímpar
         estilo.map(
             "Custom.Treeview",
             background=[("selected", COR_DESTAQUE)],
             foreground=[("selected", "white")],
         )
+        
         estilo.configure(
             "TProgressbar",
             troughcolor=COR_PAINEL, background=COR_DESTAQUE,
@@ -258,8 +270,75 @@ class FiscoCaptureApp(tk.Tk):
         )
 
     # ------------------------------------------------------------------
+    # Recursos de Cópia e Menu de Contexto
+    # ------------------------------------------------------------------
+    def _cria_menu_contexto(self):
+        self._menu = tk.Menu(self, tearoff=0, bg=COR_PAINEL, fg=COR_TEXTO, activebackground=COR_DESTAQUE)
+        self._menu.add_command(label="Copiar Inscrição", command=lambda: self._copiar_celula_especifica(1))
+        self._menu.add_command(label="Copiar Nº da CDA", command=lambda: self._copiar_celula_especifica(3))
+        self._menu.add_separator()
+        self._menu.add_command(label="Copiar Linha Completa", command=self._copiar_linha_completa)
+
+    def _tenta_copiar_para_clipboard(self, texto: str):
+        """Método encapsulado seguro para evitar travamentos de clipboard no Windows."""
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(texto)
+            self.update() # Força a atualização no Windows
+            return True
+        except Exception as e:
+            self._log_escrever(f"⚠️ Erro ao acessar a área de transferência: {e}\n")
+            return False
+
+    def _on_double_click(self, event):
+        item = self._tree.identify_row(event.y)
+        column = self._tree.identify_column(event.x)
+        if not item or not column:
+            return
+        
+        col_idx = int(column.replace("#", "")) - 1
+        valores = self._tree.item(item, "values")
+        
+        if col_idx < len(valores):
+            valor = valores[col_idx]
+            if self._tenta_copiar_para_clipboard(valor):
+                self._log_escrever(f"📋 Copiado para a área de transferência: {valor}\n")
+
+    def _on_right_click(self, event):
+        item = self._tree.identify_row(event.y)
+        if item:
+            self._tree.selection_set(item)
+            self._menu.post(event.x_root, event.y_root)
+
+    def _copiar_celula_especifica(self, col_idx):
+        selecionado = self._tree.selection()
+        if selecionado:
+            valores = self._tree.item(selecionado[0], "values")
+            if col_idx < len(valores):
+                valor = valores[col_idx]
+                if self._tenta_copiar_para_clipboard(valor):
+                    self._log_escrever(f"📋 Copiado: {valor}\n")
+
+    def _copiar_linha_completa(self):
+        selecionado = self._tree.selection()
+        if selecionado:
+            valores = self._tree.item(selecionado[0], "values")
+            linha_texto = "\t".join(str(v) for v in valores)
+            if self._tenta_copiar_para_clipboard(linha_texto):
+                self._log_escrever("📋 Linha completa copiada!\n")
+
+    # ------------------------------------------------------------------
     # Interações
     # ------------------------------------------------------------------
+    def _ao_fechar(self):
+        """Intercepção segura para garantir encerramento total da aplicação e threads."""
+        self._processando = False
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        sys.exit(0)
+
     def _centraliza(self):
         self.update_idletasks()
         w, h = self.winfo_width(), self.winfo_height()
@@ -296,12 +375,13 @@ class FiscoCaptureApp(tk.Tk):
         thread.start()
 
     def _processar(self, caminho: str):
-        """Roda em thread separada para não travar a UI."""
         try:
             registros, avisos = extrair_dados_pdf(caminho)
-            self.after(0, lambda: self._exibir_resultados(registros, avisos, caminho))
+            if self._processando: # Evita tentar atualizar interface se janela estiver fechando
+                self.after(0, lambda: self._exibir_resultados(registros, avisos, caminho))
         except Exception as exc:
-            self.after(0, lambda: self._erro_processamento(str(exc)))
+            if self._processando:
+                self.after(0, lambda: self._erro_processamento(str(exc)))
 
     def _exibir_resultados(self, registros: list[dict], avisos: list[str], caminho: str):
         self._progresso.stop()
@@ -309,13 +389,9 @@ class FiscoCaptureApp(tk.Tk):
         self._btn_processar.config(state="normal", text="▶  Processar")
         self._registros = registros
 
-        # Popula tabela
         paginas_vistas = set()
         for idx, reg in enumerate(registros):
             tag = "par" if idx % 2 == 0 else "impar"
-            if reg["tipo"] == "Inscrição":
-                tag = "inscricao"
-
             paginas_vistas.add(reg["pagina"])
             self._tree.insert("", "end", values=(
                 reg["pagina"],
@@ -325,18 +401,27 @@ class FiscoCaptureApp(tk.Tk):
                 reg["situacao"],
             ), tags=(tag,))
 
-        # Atualiza estatísticas
         total     = len(registros)
         n_paginas = len(paginas_vistas)
         n_avisos  = len(avisos)
 
         self._lbl_total.config(text=f"Registros: {total}")
         self._lbl_paginas.config(text=f"Páginas com dados: {n_paginas}")
-        cor_av = COR_ERRO if n_avisos else COR_SUCESSO
+        
+        # Garante a ordenação visual sequencial pelas páginas
+        if total > 0:
+            self._ordenar("pagina", False)
+
+        # Estilização visual amigável do status de avisos
+        if total > 0 and n_avisos > 0:
+            # Se tem dados, avisos de páginas em branco são comuns e normais
+            cor_av = COR_PAINEL
+        else:
+            cor_av = COR_ERRO if n_avisos else COR_SUCESSO
+            
         self._lbl_avisos.config(text=f"Avisos: {n_avisos}", bg=cor_av)
         self._lbl_avisos.master.config(bg=cor_av)
 
-        # Log
         nome = os.path.basename(caminho)
         self._log_escrever(
             f"\n{'='*60}\n"
@@ -345,18 +430,22 @@ class FiscoCaptureApp(tk.Tk):
             f"Páginas com dados   : {n_paginas}\n"
             f"{'='*60}\n"
         )
-        if avisos:
-            self._log_escrever("\n⚠  Avisos:\n")
-            for av in avisos:
+        
+        # Filtra avisos não relevantes para o log
+        avisos_relevantes = [av for av in avisos if "Dados de CDA identificados" in av or "Erro" in av]
+        
+        if avisos_relevantes:
+            self._log_escrever("\n⚠️  Alertas de Importação:\n")
+            for av in avisos_relevantes:
                 self._log_escrever(f"  • {av}\n")
         else:
-            self._log_escrever("✔  Nenhum aviso.\n")
+            self._log_escrever("✔  Processamento finalizado com sucesso.\n")
 
         if total == 0:
             messagebox.showinfo(
                 "Resultado",
                 "Nenhum dado de CDA encontrado no PDF.\n"
-                "Verifique a aba 'Log / Avisos' para detalhes."
+                "Verifique a aba 'Log / Avisos' para mais detalhes."
             )
 
     def _erro_processamento(self, msg: str):
@@ -390,7 +479,6 @@ class FiscoCaptureApp(tk.Tk):
         self._txt_log.config(state="disabled")
 
     def _ordenar(self, coluna: str, reverso: bool):
-        """Ordena a Treeview pela coluna clicada."""
         dados = [
             (self._tree.set(item, coluna), item)
             for item in self._tree.get_children("")
@@ -404,10 +492,7 @@ class FiscoCaptureApp(tk.Tk):
         for index, (_, item) in enumerate(dados):
             self._tree.move(item, "", index)
             tag = "par" if index % 2 == 0 else "impar"
-            # Mantém tag especial de inscrição
-            tags_atuais = self._tree.item(item, "tags")
-            if "inscricao" not in tags_atuais:
-                self._tree.item(item, tags=(tag,))
+            self._tree.item(item, tags=(tag,))
 
         self._tree.heading(
             coluna,
@@ -419,7 +504,6 @@ class FiscoCaptureApp(tk.Tk):
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
-    # No Windows, esconde o console quando empacotado com --windowed
     if sys.platform == "win32":
         try:
             import ctypes

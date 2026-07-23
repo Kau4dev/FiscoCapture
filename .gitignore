@@ -1,1 +1,3 @@
 /teste_cda.pdf
+/__pycache__/
+*.pyc

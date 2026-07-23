@@ -1,12 +1,16 @@
-name: Build Windows EXE
+name: Build and Release Windows EXE
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:   # permite rodar manualmente pelo GitHub
+    tags:
+      - 'v*' # Dispara quando você criar uma tag tipo v1.0.0
+  workflow_dispatch: # Permite disparar manualmente na aba Actions
+
+permissions:
+  contents: write
 
 jobs:
-  build-windows:
+  build-and-release:
     runs-on: windows-latest
 
     steps:
@@ -27,9 +31,20 @@ jobs:
         run: |
           pyinstaller --onefile --windowed --name FiscoCapture main.py
 
-      - name: Upload do executável
-        uses: actions/upload-artifact@v4
+      - name: Criar GitHub Release e anexar EXE
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: FiscoCapture-Windows
-          path: dist/FiscoCapture.exe
-          retention-days: 30
+          files: dist/FiscoCapture.exe
+          name: Versão ${{ github.ref_name }}
+          body: |
+            Executável FiscoCapture compilado para Windows 64-bit.
+            
+            **Melhorias desta versão:**
+            * ⚡ **Velocidade ultra otimizada:** processamento em paralelo das páginas.
+            * 📋 **Facilidade de cópia:** Dê duplo clique em uma célula para copiá-la.
+            * 🔒 **Segurança:** os dados lidos continuam apenas em tela e memória.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
