@@ -214,8 +214,7 @@ class FiscoCaptureApp(tk.Tk):
         )
 
         for col in colunas:
-            self._tree.heading(col, text=cabecalhos[col],
-                               command=lambda c=col: self._ordenar(c, False))
+            self._tree.heading(col, text=cabecalhos[col])
             self._tree.column(col, width=larguras[col],
                               minwidth=40, anchor="center")
 
@@ -314,14 +313,34 @@ class FiscoCaptureApp(tk.Tk):
             return False
 
     def _on_double_click(self, event):
-        item = self._tree.identify_row(event.y)
+        region = self._tree.identify_region(event.x, event.y)
         column = self._tree.identify_column(event.x)
-        if not item or not column:
+        
+        if not column:
             return
-        
+            
         col_idx = int(column.replace("#", "")) - 1
+
+        if region == "heading":
+            valores_coluna = []
+            for child in self._tree.get_children(""):
+                valores = self._tree.item(child, "values")
+                if col_idx < len(valores):
+                    val = valores[col_idx]
+                    if val:
+                        valores_coluna.append(str(val))
+            
+            if valores_coluna:
+                texto = "\n".join(valores_coluna)
+                if self._tenta_copiar_para_clipboard(texto):
+                    self._log_escrever(f"📋 Coluna inteira copiada ({len(valores_coluna)} itens).\n")
+            return
+
+        item = self._tree.identify_row(event.y)
+        if not item:
+            return
+            
         valores = self._tree.item(item, "values")
-        
         if col_idx < len(valores):
             valor = valores[col_idx]
             if self._tenta_copiar_para_clipboard(valor):
@@ -423,9 +442,7 @@ class FiscoCaptureApp(tk.Tk):
         n_paginas = len(set(r["pagina"] for r in registros))
         n_avisos  = len(avisos)
         
-        # Garante a ordenação visual sequencial pelas páginas
-        if total > 0:
-            self._ordenar("pagina", False)
+        # A ordenação já é garantida pelo extrator
 
         # Estilização visual amigável do status de avisos
         if total > 0 and n_avisos > 0:
@@ -446,12 +463,9 @@ class FiscoCaptureApp(tk.Tk):
             f"{'='*60}\n"
         )
         
-        # Filtra avisos não relevantes para o log
-        avisos_relevantes = [av for av in avisos if "Dados de CDA identificados" in av or "Erro" in av]
-        
-        if avisos_relevantes:
+        if avisos:
             self._log_escrever("\n⚠️  Alertas de Importação:\n")
-            for av in avisos_relevantes:
+            for av in avisos:
                 self._log_escrever(f"  • {av}\n")
         else:
             self._log_escrever("✔  Processamento finalizado com sucesso.\n")
@@ -552,8 +566,7 @@ class FiscoCaptureApp(tk.Tk):
         self._lbl_total.config(text=f"Registros: {total}")
         self._lbl_paginas.config(text=f"Páginas com dados: {n_paginas}")
 
-        if total > 0:
-            self._ordenar("pagina", False)
+
 
     def _toggle_duplicados(self):
         self._filtrando_duplicados = not self._filtrando_duplicados
@@ -594,26 +607,7 @@ class FiscoCaptureApp(tk.Tk):
         self._txt_log.see("end")
         self._txt_log.config(state="disabled")
 
-    def _ordenar(self, coluna: str, reverso: bool):
-        dados = [
-            (self._tree.set(item, coluna), item)
-            for item in self._tree.get_children("")
-        ]
-        try:
-            dados.sort(key=lambda x: int(x[0]) if x[0].isdigit() else x[0].lower(),
-                       reverse=reverso)
-        except Exception:
-            dados.sort(reverse=reverso)
 
-        for index, (_, item) in enumerate(dados):
-            self._tree.move(item, "", index)
-            tag = "par" if index % 2 == 0 else "impar"
-            self._tree.item(item, tags=(tag,))
-
-        self._tree.heading(
-            coluna,
-            command=lambda: self._ordenar(coluna, not reverso)
-        )
 
 
 # ---------------------------------------------------------------------------
